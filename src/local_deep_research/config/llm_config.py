@@ -33,6 +33,7 @@ VALID_PROVIDERS = [
     "openai_endpoint",
     "lmstudio",
     "llamacpp",
+    "litellm",
     "none",
 ]
 
