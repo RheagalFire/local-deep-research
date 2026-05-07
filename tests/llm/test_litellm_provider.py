@@ -4,7 +4,7 @@ Tests for LiteLLM provider implementation.
 Tests cover:
 - Provider class attributes and configuration
 - Auto-discovery compatibility
-- LLM creation via create_llm()
+- LLM creation via create_llm() with mocked ChatLiteLLM
 - Availability check
 - Model listing
 """
@@ -29,13 +29,6 @@ class TestLiteLLMProviderAttributes:
         )
 
         assert LiteLLMProvider.provider_key == "LITELLM"
-
-    def test_default_base_url(self):
-        from local_deep_research.llm.providers.implementations.litellm import (
-            LiteLLMProvider,
-        )
-
-        assert LiteLLMProvider.default_base_url == "http://localhost:4000/v1"
 
     def test_default_model(self):
         from local_deep_research.llm.providers.implementations.litellm import (
@@ -65,26 +58,9 @@ class TestLiteLLMProviderAttributes:
 
         assert LiteLLMProvider.api_key_setting == "llm.litellm.api_key"
 
-    def test_url_setting(self):
-        from local_deep_research.llm.providers.implementations.litellm import (
-            LiteLLMProvider,
-        )
-
-        assert LiteLLMProvider.url_setting == "llm.litellm.url"
-
 
 class TestLiteLLMProviderInheritance:
     """Tests for LiteLLMProvider inheritance chain."""
-
-    def test_extends_openai_compatible_provider(self):
-        from local_deep_research.llm.providers.implementations.litellm import (
-            LiteLLMProvider,
-        )
-        from local_deep_research.llm.providers.openai_base import (
-            OpenAICompatibleProvider,
-        )
-
-        assert issubclass(LiteLLMProvider, OpenAICompatibleProvider)
 
     def test_extends_base_llm_provider(self):
         from local_deep_research.llm.providers.implementations.litellm import (
@@ -96,12 +72,15 @@ class TestLiteLLMProviderInheritance:
 
 
 class TestLiteLLMProviderCreateLLM:
-    """Tests for LiteLLMProvider.create_llm()."""
+    """Tests for LiteLLMProvider.create_llm() with mocked litellm."""
 
     @patch(
-        "local_deep_research.llm.providers.openai_base.get_setting_from_snapshot"
+        "local_deep_research.llm.providers.implementations.litellm.get_setting_from_snapshot"
     )
-    def test_create_llm_returns_chat_openai(self, mock_settings):
+    @patch(
+        "langchain_community.chat_models.litellm.ChatLiteLLM",
+    )
+    def test_create_llm_returns_chat_litellm(self, mock_chat_cls, mock_settings):
         from local_deep_research.llm.providers.implementations.litellm import (
             LiteLLMProvider,
         )
@@ -110,58 +89,59 @@ class TestLiteLLMProviderCreateLLM:
             "llm.litellm.api_key": "sk-test-key",
             "llm.max_tokens": None,
             "llm.streaming": None,
-            "llm.max_retries": None,
-            "llm.request_timeout": None,
         }.get(key, default)
+
+        mock_instance = MagicMock()
+        mock_chat_cls.return_value = mock_instance
 
         llm = LiteLLMProvider.create_llm(
             model_name="anthropic/claude-sonnet-4-20250514",
             temperature=0.5,
         )
 
-        from langchain_openai import ChatOpenAI
-
-        assert isinstance(llm, ChatOpenAI)
+        mock_chat_cls.assert_called_once()
+        call_kwargs = mock_chat_cls.call_args.kwargs
+        assert call_kwargs["model"] == "anthropic/claude-sonnet-4-20250514"
+        assert call_kwargs["temperature"] == 0.5
+        assert call_kwargs["api_key"] == "sk-test-key"
 
     @patch(
-        "local_deep_research.llm.providers.openai_base.get_setting_from_snapshot"
+        "local_deep_research.llm.providers.implementations.litellm.get_setting_from_snapshot"
     )
-    def test_create_llm_uses_default_model(self, mock_settings):
+    @patch(
+        "langchain_community.chat_models.litellm.ChatLiteLLM",
+    )
+    def test_create_llm_uses_default_model(self, mock_chat_cls, mock_settings):
         from local_deep_research.llm.providers.implementations.litellm import (
             LiteLLMProvider,
         )
 
-        mock_settings.side_effect = lambda key, default=None, settings_snapshot=None: {
-            "llm.litellm.api_key": "sk-test-key",
-            "llm.max_tokens": None,
-            "llm.streaming": None,
-            "llm.max_retries": None,
-            "llm.request_timeout": None,
-        }.get(key, default)
+        mock_settings.return_value = None
+        mock_chat_cls.return_value = MagicMock()
 
-        llm = LiteLLMProvider.create_llm()
+        LiteLLMProvider.create_llm()
 
-        assert llm.model_name == "openai/gpt-4o"
+        call_kwargs = mock_chat_cls.call_args.kwargs
+        assert call_kwargs["model"] == "openai/gpt-4o"
 
     @patch(
-        "local_deep_research.llm.providers.openai_base.get_setting_from_snapshot"
+        "local_deep_research.llm.providers.implementations.litellm.get_setting_from_snapshot"
     )
-    def test_create_llm_uses_default_base_url(self, mock_settings):
+    @patch(
+        "langchain_community.chat_models.litellm.ChatLiteLLM",
+    )
+    def test_create_llm_omits_api_key_when_not_set(self, mock_chat_cls, mock_settings):
         from local_deep_research.llm.providers.implementations.litellm import (
             LiteLLMProvider,
         )
 
-        mock_settings.side_effect = lambda key, default=None, settings_snapshot=None: {
-            "llm.litellm.api_key": "sk-test-key",
-            "llm.max_tokens": None,
-            "llm.streaming": None,
-            "llm.max_retries": None,
-            "llm.request_timeout": None,
-        }.get(key, default)
+        mock_settings.return_value = None
+        mock_chat_cls.return_value = MagicMock()
 
-        llm = LiteLLMProvider.create_llm()
+        LiteLLMProvider.create_llm()
 
-        assert "localhost:4000" in str(llm.openai_api_base)
+        call_kwargs = mock_chat_cls.call_args.kwargs
+        assert "api_key" not in call_kwargs
 
 
 class TestLiteLLMProviderAvailability:
@@ -175,7 +155,7 @@ class TestLiteLLMProviderAvailability:
         assert LiteLLMProvider.requires_auth_for_models() is False
 
     @patch(
-        "local_deep_research.llm.providers.openai_base.get_setting_from_snapshot"
+        "local_deep_research.llm.providers.implementations.litellm.get_setting_from_snapshot"
     )
     def test_is_available_with_api_key(self, mock_settings):
         from local_deep_research.llm.providers.implementations.litellm import (
@@ -183,20 +163,20 @@ class TestLiteLLMProviderAvailability:
         )
 
         mock_settings.return_value = "sk-test-key"
-
         assert LiteLLMProvider.is_available() is True
 
     @patch(
-        "local_deep_research.llm.providers.openai_base.get_setting_from_snapshot"
+        "local_deep_research.llm.providers.implementations.litellm.get_setting_from_snapshot"
     )
-    def test_is_not_available_without_api_key(self, mock_settings):
+    def test_is_available_with_litellm_installed(self, mock_settings):
         from local_deep_research.llm.providers.implementations.litellm import (
             LiteLLMProvider,
         )
 
         mock_settings.return_value = None
-
-        assert LiteLLMProvider.is_available() is False
+        # litellm is importable in this test env (or mock it)
+        with patch.dict("sys.modules", {"litellm": MagicMock()}):
+            assert LiteLLMProvider.is_available() is True
 
 
 class TestLiteLLMProviderAutoDiscovery:
